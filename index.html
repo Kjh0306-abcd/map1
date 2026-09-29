@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>부산광역시 편의점 상권 지도 대시보드</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+  
+  <!-- Leaflet CSS & JS (안정적인 cdnjs 활용, 100% 무료 오픈소스 지도) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  
+  <!-- Leaflet MarkerCluster CSS & JS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+  
+  <!-- PapaParse CSV 파서 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  
+  <!-- Chart.js 통계 차트 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* 기본 전역 레이아웃 및 맵 절대 크기 보장 */
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    
+    #map-wrapper {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      flex: 1;
+      min-height: 300px;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: 100% !important;
+      height: 100% !important;
+      background-color: #e5e7eb;
+      z-index: 1;
+    }
+
+    /* 커스텀 스크롤바 */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    
+    /* 브랜드별 핀 마커 스타일 */
+    .custom-marker-pin {
+      width: 32px;
+      height: 32px;
+      border-radius: 50% 50% 50% 0;
+      position: absolute;
+      transform: rotate(-45deg);
+      left: 50%;
+      top: 50%;
+      margin: -20px 0 0 -20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+      border: 2px solid white;
+      transition: transform 0.15s ease-out;
+    }
+    .custom-marker-pin:hover {
+      transform: rotate(-45deg) scale(1.15);
+      z-index: 1000;
+    }
+    .custom-marker-text {
+      transform: rotate(45deg);
+      color: white;
+      font-weight: 800;
+      font-size: 10px;
+      text-align: center;
+      line-height: 1;
+    }
+    
+    /* Leaflet 팝업 스타일 */
+    .leaflet-popup-content-wrapper {
+      padding: 0;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25);
+    }
+    .leaflet-popup-content {
+      margin: 0 !important;
+      line-height: 1.5;
+    }
+    
+    /* 클러스터 마커 디자인 */
+    .marker-cluster-small { background-color: rgba(59, 130, 246, 0.35); }
+    .marker-cluster-small div { background-color: rgba(37, 99, 235, 0.9); color: white; font-weight: bold; }
+    .marker-cluster-medium { background-color: rgba(245, 158, 11, 0.35); }
+    .marker-cluster-medium div { background-color: rgba(217, 119, 6, 0.9); color: white; font-weight: bold; }
+    .marker-cluster-large { background-color: rgba(239, 68, 68, 0.35); }
+    .marker-cluster-large div { background-color: rgba(220, 38, 38, 0.9); color: white; font-weight: bold; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 flex flex-col">
+
+  <!-- 상단 네비게이션 헤더 -->
+  <header class="bg-white border-b border-slate-200 px-4 py-2.5 flex items-center justify-between z-30 shrink-0 shadow-sm">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white text-lg shadow-md shadow-blue-200">
+        <i class="fa-solid fa-store"></i>
+      </div>
+      <div>
+        <h1 class="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+          부산시 편의점 상권 지도
+          <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-300">
+            무료 오픈소스 지도 (No-API-Key)
+          </span>
+        </h1>
+        <p class="text-xs text-slate-500 hidden sm:block">소상공인시장진흥공단 상가(상권)정보 기반 부산 전역 편의점 공간 분석</p>
+      </div>
+    </div>
+    
+    <!-- 우측 헤더 컨트롤 버튼들 -->
+    <div class="flex items-center gap-2">
+      <!-- 지도 타일 선택 -->
+      <div class="relative inline-block text-left">
+        <select id="tileSelect" class="bg-slate-50 border border-slate-300 text-slate-700 text-xs rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+          <option value="carto">CARTO 보이저 (추천)</option>
+          <option value="positron">CARTO 포지트론 (화이트)</option>
+          <option value="osm">OpenStreetMap</option>
+          <option value="dark">CARTO 다크 모드</option>
+        </select>
+      </div>
+
+      <!-- CSV 파일 선택 버튼 -->
+      <label for="csvFileInput" class="cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm animate-pulse">
+        <i class="fa-solid fa-file-csv"></i>
+        <span>전체 CSV 불러오기</span>
+      </label>
+      <input type="file" id="csvFileInput" accept=".csv" class="hidden">
+
+      <!-- 부산 전체 보기 리셋 버튼 -->
+      <button id="btnResetView" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition shadow-sm">
+        <i class="fa-solid fa-arrows-rotate"></i>
+        <span class="hidden sm:inline">부산 전체</span>
+      </button>
+
+      <!-- 모바일 사이드바 토글 버튼 -->
+      <button id="btnToggleSidebar" class="md:hidden bg-slate-100 text-slate-700 p-2 rounded-lg text-sm border border-slate-300">
+        <i class="fa-solid fa-bars"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- 메인 바디 영역: 좌측 사이드바 + 우측 지도 -->
+  <div class="flex-1 flex relative overflow-hidden" style="height: calc(100vh - 57px);">
+
+    <!-- 좌측 사이드바 필터 패널 -->
+    <aside id="sidebar" class="w-full sm:w-96 bg-white border-r border-slate-200 flex flex-col z-20 transition-all duration-300 absolute md:relative inset-y-0 left-0 shadow-lg md:shadow-none -translate-x-full md:translate-x-0">
+      
+      <!-- 사이드바 상단 탭/헤더 -->
+      <div class="p-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <span class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+          <i class="fa-solid fa-sliders text-blue-600"></i> 검색 & 필터 제어
+        </span>
+        <span id="dataStatusBadge" class="text-[11px] px-2 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700">
+          샘플 데이터 표시 중
+        </span>
+      </div>
+
+      <!-- 스크롤 가능한 필터 및 정보 영역 -->
+      <div class="flex-1 overflow-y-auto p-4 space-y-4">
+
+        <!-- 1. 핵심 요약 카드 -->
+        <div class="grid grid-cols-2 gap-2.5">
+          <div class="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 p-3 rounded-xl">
+            <span class="text-[11px] font-semibold text-blue-600 block">전체 점포</span>
+            <span id="totalCountDisplay" class="text-xl font-extrabold text-blue-900">0</span>
+            <span class="text-[10px] text-blue-500">개소 등록</span>
+          </div>
+          <div class="bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 p-3 rounded-xl">
+            <span class="text-[11px] font-semibold text-emerald-600 block">현재 지도 표시</span>
+            <span id="filteredCountDisplay" class="text-xl font-extrabold text-emerald-900">0</span>
+            <span class="text-[10px] text-emerald-500">개소 필터링</span>
+          </div>
+        </div>
+
+        <!-- 2. 지역 선택 (구/군) -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+            <i class="fa-solid fa-location-dot text-rose-500"></i> 지역 선택 (부산 16개 구·군)
+          </label>
+          <div class="relative">
+            <select id="guFilter" class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none">
+              <option value="ALL">부산광역시 전체 (모든 구·군)</option>
+              <option value="중구">중구</option>
+              <option value="서구">서구</option>
+              <option value="동구">동구</option>
+              <option value="영도구">영도구</option>
+              <option value="부산진구">부산진구</option>
+              <option value="동래구">동래구</option>
+              <option value="남구">남구</option>
+              <option value="북구">북구</option>
+              <option value="해운대구">해운대구</option>
+              <option value="사하구">사하구</option>
+              <option value="금정구">금정구</option>
+              <option value="강서구">강서구</option>
+              <option value="연제구">연제구</option>
+              <option value="수영구">수영구</option>
+              <option value="사상구">사상구</option>
+              <option value="기장군">기장군</option>
+            </select>
+            <i class="fa-solid fa-chevron-down absolute right-3 top-2.5 text-xs text-slate-400 pointer-events-none"></i>
+          </div>
+        </div>
+
+        <!-- 3. 키워드 검색 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+            <i class="fa-solid fa-magnifying-glass text-blue-500"></i> 점포명 / 도로명 검색
+          </label>
+          <div class="relative">
+            <input type="text" id="searchInput" placeholder="예: 서면, 해운대, 전포, 광안리..." 
+              class="w-full bg-slate-50 border border-slate-300 text-slate-800 text-xs rounded-lg pl-8 pr-7 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+            <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-slate-400 text-xs"></i>
+            <button id="btnClearSearch" class="hidden absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- 4. 편의점 브랜드별 필터 -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+              <i class="fa-solid fa-tags text-indigo-500"></i> 편의점 브랜드
+            </label>
+            <div class="flex gap-2">
+              <button id="btnSelectAllBrands" class="text-[11px] text-blue-600 hover:underline">전체선택</button>
+              <span class="text-slate-300">|</span>
+              <button id="btnDeselectAllBrands" class="text-[11px] text-slate-500 hover:underline">전체해제</button>
+            </div>
+          </div>
+          
+          <div id="brandFilterList" class="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
+            <!-- 자바스크립트로 동적 렌더링 -->
+          </div>
+        </div>
+
+        <!-- 5. 브랜드 점유율 차트 -->
+        <div class="bg-white border border-slate-200 rounded-xl p-3 shadow-sm">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+              <i class="fa-solid fa-chart-pie text-amber-500"></i> 브랜드별 점유율
+            </span>
+            <span class="text-[10px] text-slate-400">실시간 연동</span>
+          </div>
+          <div class="h-40 relative flex items-center justify-center">
+            <canvas id="brandChart"></canvas>
+          </div>
+        </div>
+
+        <!-- 6. 점포 목록 간이 리스트 -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+              <i class="fa-solid fa-list-ul text-slate-500"></i> 점포 목록 (클릭 시 이동)
+            </label>
+            <span id="listCountLabel" class="text-[11px] text-slate-400">0개 점포</span>
+          </div>
+          <div id="storeListContainer" class="max-h-52 overflow-y-auto space-y-1.5 pr-1 text-xs">
+            <!-- 검색 결과 점포 리스트 -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 사이드바 푸터 -->
+      <div class="p-3 border-t border-slate-200 bg-slate-50 text-[11px] text-slate-500 flex items-center justify-between">
+        <span>소상공인시장진흥공단 DB</span>
+        <button id="btnHelpModal" class="text-blue-600 hover:underline">
+          <i class="fa-regular fa-circle-question"></i> 사용안내
+        </button>
+      </div>
+    </aside>
+
+    <!-- 우측 메인 지도 캔버스 -->
+    <main id="map-wrapper">
+      <!-- 실제 Leaflet이 마운트되는 div -->
+      <div id="map"></div>
+
+      <!-- 화면 중앙 드래그앤드롭 오버레이 -->
+      <div id="dropZoneOverlay" class="hidden absolute inset-0 bg-blue-900/60 backdrop-blur-sm z-50 flex flex-col items-center justify-center text-white border-4 border-dashed border-white m-4 rounded-3xl pointer-events-none">
+        <i class="fa-solid fa-cloud-arrow-up text-5xl mb-3 animate-bounce"></i>
+        <p class="text-xl font-bold mb-1">CSV 파일을 여기에 놓으세요!</p>
+        <p class="text-sm text-blue-200">부산 편의점 상가정보 CSV를 즉시 분석합니다.</p>
+      </div>
+
+      <!-- CSV 로드 안내 배너 -->
+      <div id="welcomeBanner" class="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-white/95 backdrop-blur shadow-xl border border-slate-200 px-4 py-3 rounded-2xl flex items-center gap-3 transition-all max-w-lg w-11/12 sm:w-auto">
+        <div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+          <i class="fa-solid fa-circle-info"></i>
+        </div>
+        <div class="text-xs text-slate-700">
+          <p class="font-bold text-slate-900" id="welcomeBannerTitle">현재 샘플 50개 점포가 지도에 표시되어 있습니다.</p>
+          <p class="text-slate-500" id="welcomeBannerDesc">
+            전체 2,780개 점포를 보려면 상단의 
+            <label for="csvFileInput" class="text-emerald-700 font-bold underline cursor-pointer">[전체 CSV 불러오기]</label>를 눌러 CSV 파일을 선택하세요!
+          </p>
+        </div>
+        <button id="btnCloseBanner" class="text-slate-400 hover:text-slate-600 ml-2">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <!-- 플로팅 퀵 컨트롤 버튼 (화면 우하단) -->
+      <div class="absolute bottom-6 right-6 z-20 flex flex-col gap-2">
+        <button id="btnZoomToBusan" title="부산 전역 뷰" class="w-10 h-10 bg-white hover:bg-slate-50 text-slate-700 rounded-full shadow-lg flex items-center justify-center border border-slate-200 transition">
+          <i class="fa-solid fa-location-crosshairs text-blue-600"></i>
+        </button>
+        <button id="btnToggleClustering" title="클러스터링 토글" class="w-10 h-10 bg-white hover:bg-slate-50 text-emerald-600 rounded-full shadow-lg flex items-center justify-center border border-slate-200 transition">
+          <i class="fa-solid fa-circle-nodes"></i>
+        </button>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- 도움말 모달 -->
+  <div id="helpModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b pb-3">
+        <h3 class="font-bold text-slate-900 text-base flex items-center gap-2">
+          <i class="fa-solid fa-circle-info text-blue-600"></i> 이용 안내 및 특징
+        </h3>
+        <button id="btnCloseHelpModal" class="text-slate-400 hover:text-slate-600">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+      <div class="text-xs text-slate-600 space-y-3 leading-relaxed">
+        <div class="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
+          <p class="font-bold text-emerald-900 mb-1">💡 100% 완전 무료 오픈소스 지도</p>
+          <p>카카오, 네이버, 구글 등 유료 API 키 발급이 일절 필요 없습니다. Leaflet.js와 OpenStreetMap 타일을 사용하여 영구 무료로 안전하게 동작합니다.</p>
+        </div>
+        <div>
+          <p class="font-bold text-slate-800 mb-1">📍 브랜드별 색상 구분</p>
+          <p>상호명을 자동으로 분석하여 GS25(파랑), CU(보라), 세븐일레븐(초록), 이마트24(노랑), 미니스톱, 씨스페이스, 기타 개인 편의점으로 고유 핀 마커를 표시합니다.</p>
+        </div>
+        <div>
+          <p class="font-bold text-slate-800 mb-1">📂 전체 CSV 파일 분석</p>
+          <p>상단 <strong>[전체 CSV 불러오기]</strong> 버튼을 누르고 같은 폴더의 <code>소상공인시장진흥공단_상가(상권)정보_부산_편의점_202606.csv</code>를 선택하면 2,780개 점포 전체가 로딩되며, 다음부터는 브라우저에 자동 기억됩니다.</p>
+        </div>
+      </div>
+      <div class="pt-2 text-right">
+        <button id="btnConfirmHelp" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-xl">
+          확인
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // -------------------------------------------------------------
+    // 기본 내장 부산 대표 편의점 50개 샘플
+    // -------------------------------------------------------------
+    const EMBEDDED_SAMPLE_STORES = [
+      { id: "S1", name: "GS25용호 중앙점", branch: "중앙점", brand: "GS25", gu: "남구", dong: "용호동", road: "부산광역시 남구 동명로 129-2", lat: 35.119934, lng: 129.111213 },
+      { id: "S2", name: "GS25동래 제일점", branch: "제일점", brand: "GS25", gu: "동래구", dong: "온천동", road: "부산광역시 동래구 금강로 85", lat: 35.216712, lng: 129.078194 },
+      { id: "S3", name: "씨유남포 롯데점", branch: "롯데점", brand: "CU", gu: "중구", dong: "남포동1가", road: "부산광역시 중구 태종로 4", lat: 35.097610, lng: 129.035506 },
+      { id: "S4", name: "세븐일레븐장안휴게소", branch: "울산방향", brand: "세븐일레븐", gu: "기장군", dong: "장안읍", road: "부산광역시 기장군 장안읍 동해고속도로 26", lat: 35.382870, lng: 129.248399 },
+      { id: "S5", name: "이마트24양정이즈 팰리스점", branch: "팰리스점", brand: "이마트24", gu: "부산진구", dong: "양정동", road: "부산광역시 부산진구 연수로11번길 15", lat: 35.174169, lng: 129.072940 },
+      { id: "S6", name: "GS25수정서로점", branch: "", brand: "GS25", gu: "동구", dong: "수정동", road: "부산광역시 동구 수정서로 8", lat: 35.130342, lng: 129.042375 },
+      { id: "S7", name: "GS25덕천대방점", branch: "", brand: "GS25", gu: "북구", dong: "덕천동", road: "부산광역시 북구 만덕대로 104", lat: 35.212607, lng: 129.016171 },
+      { id: "S8", name: "GS25해운스카이점", branch: "", brand: "GS25", gu: "해운대구", dong: "재송동", road: "부산광역시 해운대구 재반로152번길 8-7", lat: 35.191273, lng: 129.128481 },
+      { id: "S9", name: "GS25정관산업로점", branch: "", brand: "GS25", gu: "기장군", dong: "정관읍", road: "부산광역시 기장군 정관읍 정관산업로 1135", lat: 35.316274, lng: 129.175806 },
+      { id: "S10", name: "GS25서면 중앙점", branch: "중앙점", brand: "GS25", gu: "부산진구", dong: "부전동", road: "부산광역시 부산진구 서면로 19-1", lat: 35.152487, lng: 129.057599 },
+      { id: "S11", name: "이마트24재송원룸점", branch: "", brand: "이마트24", gu: "해운대구", dong: "재송동", road: "부산광역시 해운대구 재반로42번길 22", lat: 35.182617, lng: 129.127750 },
+      { id: "S12", name: "이마트24부산 용호점", branch: "용호점", brand: "이마트24", gu: "남구", dong: "용호동", road: "부산광역시 남구 용호로198번길 11", lat: 35.114658, lng: 129.110397 },
+      { id: "S13", name: "GS25연산배산점", branch: "", brand: "GS25", gu: "연제구", dong: "연산동", road: "부산광역시 연제구 금련로 7", lat: 35.173097, lng: 129.096454 },
+      { id: "S14", name: "씨유부산역 중앙점", branch: "중앙점", brand: "CU", gu: "동구", dong: "초량동", road: "부산광역시 동구 중앙대로 324", lat: 35.124964, lng: 129.045477 },
+      { id: "S15", name: "GS25해운 재송점", branch: "재송점", brand: "GS25", gu: "해운대구", dong: "재송동", road: "부산광역시 해운대구 해운대로123번길 32", lat: 35.186075, lng: 129.122747 },
+      { id: "S16", name: "GS25부산대도서관점", branch: "", brand: "GS25", gu: "금정구", dong: "장전동", road: "부산광역시 금정구 부산대학로63번길 2-1", lat: 35.234841, lng: 129.068859 },
+      { id: "S17", name: "GS25골든튤립점해운대", branch: "해운대", brand: "GS25", gu: "해운대구", dong: "중동", road: "부산광역시 해운대구 해운대해변로 322", lat: 35.162278, lng: 129.165880 },
+      { id: "S18", name: "씨유동래대우점", branch: "", brand: "CU", gu: "동래구", dong: "온천동", road: "부산광역시 동래구 충렬대로126번길 5", lat: 35.205683, lng: 129.074454 },
+      { id: "S19", name: "GS25구포 동성점", branch: "동성점", brand: "GS25", gu: "북구", dong: "구포동", road: "부산광역시 북구 모분재로 103", lat: 35.198773, lng: 129.008100 },
+      { id: "S20", name: "세븐일레븐부산괴정북개로점", branch: "", brand: "세븐일레븐", gu: "사하구", dong: "괴정동", road: "부산광역시 사하구 괴정로 179", lat: 35.098301, lng: 128.981278 },
+      { id: "S21", name: "씨유뉴학장 중앙점", branch: "중앙점", brand: "CU", gu: "사상구", dong: "학장동", road: "부산광역시 사상구 새벽로77번길 3", lat: 35.147943, lng: 128.980989 },
+      { id: "S22", name: "지에스25크라운하버", branch: "", brand: "GS25", gu: "중구", dong: "중앙동4가", road: "부산광역시 중구 중앙대로 114", lat: 35.107564, lng: 129.036817 },
+      { id: "S23", name: "지에스25서구한울", branch: "", brand: "GS25", gu: "서구", dong: "토성동4가", road: "부산광역시 서구 구덕로 120-1", lat: 35.096754, lng: 129.023094 },
+      { id: "S24", name: "더까까주까정관 본점", branch: "본점", brand: "기타", gu: "기장군", dong: "정관읍", road: "부산광역시 기장군 정관읍 정관5로 12", lat: 35.319472, lng: 129.174364 },
+      { id: "S25", name: "씨유 사상덕포점", branch: "사상덕포점", brand: "CU", gu: "사상구", dong: "덕포동", road: "부산광역시 사상구 사상로 369", lat: 35.177674, lng: 128.984762 },
+      { id: "S26", name: "이마트24부산교대 중앙점", branch: "중앙점", brand: "이마트24", gu: "연제구", dong: "거제동", road: "부산광역시 연제구 중앙대로1235번길 13", lat: 35.197243, lng: 129.078422 },
+      { id: "S27", name: "지에스25명지 포스코점", branch: "포스코점", brand: "GS25", gu: "강서구", dong: "명지동", road: "부산광역시 강서구 명지국제2로 41", lat: 35.094793, lng: 128.906665 },
+      { id: "S28", name: "씨유센텀타워메디컬점", branch: "", brand: "CU", gu: "해운대구", dong: "우동", road: "부산광역시 해운대구 센텀2로 20", lat: 35.167195, lng: 129.132034 },
+      { id: "S29", name: "씨유괘법 광장점", branch: "광장점", brand: "CU", gu: "사상구", dong: "괘법동", road: "부산광역시 사상구 광장로 95", lat: 35.162852, lng: 128.986816 },
+      { id: "S30", name: "세븐일레븐부산가덕천성점", branch: "", brand: "세븐일레븐", gu: "강서구", dong: "천성동", road: "부산광역시 강서구 가덕해안로 789-2", lat: 35.027813, lng: 128.815849 },
+      { id: "S31", name: "세븐일레븐부산서면전포점", branch: "", brand: "세븐일레븐", gu: "부산진구", dong: "전포동", road: "부산광역시 부산진구 전포대로209번길 7", lat: 35.155276, lng: 129.064735 },
+      { id: "S32", name: "세븐일레븐부산가톨릭대학점", branch: "", brand: "세븐일레븐", gu: "금정구", dong: "부곡동", road: "부산광역시 금정구 오륜대로 57", lat: 35.244677, lng: 129.096878 },
+      { id: "S33", name: "지에스25동구 초량점", branch: "초량점", brand: "GS25", gu: "동구", dong: "초량동", road: "부산광역시 동구 중앙대로296번길 3-2", lat: 35.122867, lng: 129.044744 },
+      { id: "S34", name: "지에스25거제원룸점", branch: "", brand: "GS25", gu: "연제구", dong: "거제동", road: "부산광역시 연제구 거제천로 17", lat: 35.176416, lng: 129.070659 },
+      { id: "S35", name: "씨유부산 동래점", branch: "동래점", brand: "CU", gu: "동래구", dong: "명륜동", road: "부산광역시 동래구 온천천로 147", lat: 35.206362, lng: 129.078995 },
+      { id: "S36", name: "세븐일레븐부산하단 골드점", branch: "골드점", brand: "세븐일레븐", gu: "사하구", dong: "하단동", road: "부산광역시 사하구 낙동남로1405번길 9-8", lat: 35.107042, lng: 128.964689 },
+      { id: "S37", name: "씨유정관모전리점", branch: "", brand: "CU", gu: "기장군", dong: "정관읍", road: "부산광역시 기장군 정관읍 모전1길 36", lat: 35.336417, lng: 129.168649 },
+      { id: "S38", name: "씨유반여아시아점", branch: "", brand: "CU", gu: "해운대구", dong: "반여동", road: "부산광역시 해운대구 선수촌로 104-16", lat: 35.202612, lng: 129.120137 },
+      { id: "S39", name: "코리아세븐부산 해운대점", branch: "해운대점", brand: "세븐일레븐", gu: "해운대구", dong: "중동", road: "부산광역시 해운대구 구남로 47", lat: 35.160193, lng: 129.162028 },
+      { id: "S40", name: "GS25 동부점", branch: "동부점", brand: "GS25", gu: "동구", dong: "좌천동", road: "부산광역시 동구 정공단로 27", lat: 35.135771, lng: 129.054413 },
+      { id: "S41", name: "GS25구서 골드점", branch: "골드점", brand: "GS25", gu: "금정구", dong: "구서동", road: "부산광역시 금정구 체육공원로 37", lat: 35.247438, lng: 129.096686 },
+      { id: "S42", name: "GS25괘법세롬점", branch: "", brand: "GS25", gu: "사상구", dong: "괘법동", road: "부산광역시 사상구 새벽로202번길 25", lat: 35.159026, lng: 128.985461 },
+      { id: "S43", name: "지에스25개금플라워", branch: "", brand: "GS25", gu: "부산진구", dong: "개금동", road: "부산광역시 부산진구 복지로 22", lat: 35.151119, lng: 129.020029 },
+      { id: "S44", name: "세븐일레븐부산생곡공단점", branch: "", brand: "세븐일레븐", gu: "강서구", dong: "생곡동", road: "부산광역시 강서구 가락대로 706", lat: 35.136898, lng: 128.869623 },
+      { id: "S45", name: "세븐부산동삼그린점", branch: "", brand: "세븐일레븐", gu: "영도구", dong: "동삼동", road: "부산광역시 영도구 상리로 33", lat: 35.084687, lng: 129.067943 },
+      { id: "S46", name: "지에스25사상부원점", branch: "", brand: "GS25", gu: "사상구", dong: "덕포동", road: "부산광역시 사상구 백양대로804번길 13", lat: 35.178821, lng: 128.989564 },
+      { id: "S47", name: "세븐일레븐 송도해변점", branch: "", brand: "세븐일레븐", gu: "서구", dong: "암남동", road: "부산광역시 서구 송도해변로 133", lat: 35.077715, lng: 129.021319 },
+      { id: "S48", name: "씨유 광안리해변점", branch: "", brand: "CU", gu: "수영구", dong: "광안동", road: "부산광역시 수영구 광안해변로 179", lat: 35.153400, lng: 129.118700 },
+      { id: "S49", name: "지에스25 수영로터리점", branch: "", brand: "GS25", gu: "수영구", dong: "수영동", road: "부산광역시 수영구 수영로 688", lat: 35.166800, lng: 129.115400 },
+      { id: "S50", name: "씨유녹산공단점", branch: "", brand: "CU", gu: "강서구", dong: "송정동", road: "부산광역시 강서구 녹산산단335로 24-8", lat: 35.090606, lng: 128.854794 }
+    ];
+
+    const BUSAN_CENTER = [35.1795543, 129.0756416];
+    const DEFAULT_ZOOM = 11;
+    
+    const GU_CENTERS = {
+      "ALL": { lat: 35.1795543, lng: 129.0756416, zoom: 11 },
+      "중구": { lat: 35.1062, lng: 129.0324, zoom: 14 },
+      "서구": { lat: 35.0979, lng: 129.0244, zoom: 14 },
+      "동구": { lat: 35.1293, lng: 129.0454, zoom: 14 },
+      "영도구": { lat: 35.0912, lng: 129.0678, zoom: 13 },
+      "부산진구": { lat: 35.1631, lng: 129.0532, zoom: 13 },
+      "동래구": { lat: 35.2048, lng: 129.0836, zoom: 13 },
+      "남구": { lat: 35.1365, lng: 129.0842, zoom: 13 },
+      "북구": { lat: 35.1972, lng: 128.9903, zoom: 13 },
+      "해운대구": { lat: 35.1631, lng: 129.1636, zoom: 13 },
+      "사하구": { lat: 35.1044, lng: 128.9749, zoom: 13 },
+      "금정구": { lat: 35.2430, lng: 129.0921, zoom: 13 },
+      "강서구": { lat: 35.2122, lng: 128.9806, zoom: 12 },
+      "연제구": { lat: 35.1765, lng: 129.0797, zoom: 14 },
+      "수영구": { lat: 35.1456, lng: 129.1132, zoom: 14 },
+      "사상구": { lat: 35.1526, lng: 128.9913, zoom: 13 },
+      "기장군": { lat: 35.2447, lng: 129.2223, zoom: 12 }
+    };
+
+    const BRAND_CONFIG = {
+      "GS25": { name: "GS25", color: "#007BC3", abbr: "GS", regex: /GS25|지에스25|GS 25/i },
+      "CU": { name: "CU", color: "#633991", abbr: "CU", regex: /CU|씨유|C\.U/i },
+      "세븐일레븐": { name: "세븐일레븐", color: "#008054", abbr: "7E", regex: /세븐일레븐|7-ELEVEN|7-eleven|7ELEVEN|세븐|코리아세븐/i },
+      "이마트24": { name: "이마트24", color: "#E59E00", abbr: "E24", regex: /이마트24|emart24|E마트24|emart/i },
+      "미니스톱": { name: "미니스톱", color: "#005BAC", abbr: "MS", regex: /미니스톱|ministop|MINISTOP/i },
+      "씨스페이스": { name: "씨스페이스", color: "#E60012", abbr: "CS", regex: /씨스페이스|c-space|C-SPACE/i },
+      "기타": { name: "기타/개인", color: "#64748B", abbr: "기타", regex: null }
+    };
+
+    // CARTO Basemaps 공식 API 키 적용 (공식 파라미터 규격: ?key=)
+    const CARTO_API_KEY = "cb1_42xa_1_2450f7d613192591ebe0fbdb";
+
+    // 타일 레이어 정의 (CARTO 고화질 베이스맵 + OSM)
+    const TILE_LAYERS = {
+      carto: L.tileLayer(`https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`, {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20
+      }),
+      positron: L.tileLayer(`https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`, {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20
+      }),
+      osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors',
+        maxZoom: 19
+      }),
+      dark: L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`, {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20
+      })
+    };
+
+    // -------------------------------------------------------------
+    // 애플리케이션 상태
+    // -------------------------------------------------------------
+    let map = null;
+    let clusterGroup = null;
+    let rawStores = [...EMBEDDED_SAMPLE_STORES]; // 기본으로 50개 샘플 내장
+    let filteredStores = [];
+    let activeBrands = new Set(Object.keys(BRAND_CONFIG));
+    let brandChart = null;
+    let isClusteringEnabled = true;
+    let currentTileLayer = null;
+
+    // -------------------------------------------------------------
+    // 지도 초기화
+    // -------------------------------------------------------------
+    function initMap() {
+      // Leaflet 맵 생성
+      map = L.map('map', {
+        center: BUSAN_CENTER,
+        zoom: DEFAULT_ZOOM,
+        zoomControl: false,
+        preferCanvas: true
+      });
+
+      L.control.zoom({ position: 'topright' }).addTo(map);
+
+      // 인증된 CARTO Voyager 고화질 타일 레이어 기본 적용
+      currentTileLayer = TILE_LAYERS.carto;
+      currentTileLayer.addTo(map);
+
+      // 클러스터 그룹 초기화
+      clusterGroup = L.markerClusterGroup({
+        chunkedLoading: true,
+        maxClusterRadius: 45,
+        spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false,
+        zoomToBoundsOnClick: true
+      });
+      map.addLayer(clusterGroup);
+
+      // 타일 변경 이벤트
+      document.getElementById('tileSelect').addEventListener('change', (e) => {
+        const val = e.target.value;
+        if (TILE_LAYERS[val]) {
+          map.removeLayer(currentTileLayer);
+          currentTileLayer = TILE_LAYERS[val];
+          currentTileLayer.addTo(map);
+        }
+      });
+
+      // 리셋 및 줌 버튼
+      document.getElementById('btnResetView').addEventListener('click', () => {
+        document.getElementById('guFilter').value = 'ALL';
+        document.getElementById('searchInput').value = '';
+        document.getElementById('btnClearSearch').classList.add('hidden');
+        resetAllBrandFilters(true);
+        applyFilters();
+        map.flyTo(BUSAN_CENTER, DEFAULT_ZOOM);
+      });
+
+      document.getElementById('btnZoomToBusan').addEventListener('click', () => {
+        map.flyTo(BUSAN_CENTER, DEFAULT_ZOOM);
+      });
+
+      // 클러스터링 토글
+      document.getElementById('btnToggleClustering').addEventListener('click', () => {
+        isClusteringEnabled = !isClusteringEnabled;
+        const btn = document.getElementById('btnToggleClustering');
+        if (isClusteringEnabled) {
+          btn.classList.replace('text-slate-400', 'text-emerald-600');
+        } else {
+          btn.classList.replace('text-emerald-600', 'text-slate-400');
+        }
+        renderMarkers();
+      });
+
+      // 지도 컨테이너 크기 재계산 (Leaflet 고질적 회색 화면 방지)
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 100);
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 500);
+      window.addEventListener('resize', () => {
+        if (map) map.invalidateSize();
+      });
+    }
+
+    // -------------------------------------------------------------
+    // 브랜드 판별
+    // -------------------------------------------------------------
+    function detectBrand(storeName) {
+      if (!storeName) return "기타";
+      for (const [brandKey, config] of Object.entries(BRAND_CONFIG)) {
+        if (config.regex && config.regex.test(storeName)) {
+          return brandKey;
+        }
+      }
+      return "기타";
+    }
+
+    // 커스텀 마커 아이콘
+    function createCustomMarkerIcon(brandKey) {
+      const config = BRAND_CONFIG[brandKey] || BRAND_CONFIG["기타"];
+      const html = `
+        <div class="custom-marker-pin" style="background-color: ${config.color};">
+          <span class="custom-marker-text">${config.abbr}</span>
+        </div>
+      `;
+      return L.divIcon({
+        className: 'custom-div-icon',
+        html: html,
+        iconSize: [32, 32],
+        iconAnchor: [16, 32],
+        popupAnchor: [0, -30]
+      });
+    }
+
+    // -------------------------------------------------------------
+    // CSV 데이터 파싱
+    // -------------------------------------------------------------
+    function parseCSVData(csvText) {
+      Papa.parse(csvText, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+          const rows = results.data;
+          const parsed = [];
+
+          for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            const lat = parseFloat(r['위도'] || r['lat'] || r['latitude']);
+            const lng = parseFloat(r['경도'] || r['lng'] || r['longitude'] || r['lon']);
+
+            // 위경도 결측치 및 유효성 검사 (부산 권역)
+            if (isNaN(lat) || isNaN(lng) || lat < 34.5 || lat > 36.0 || lng < 128.0 || lng > 130.0) {
+              continue;
+            }
+
+            const name = (r['상호명'] || r['name'] || '').trim();
+            const branch = (r['지점명'] || r['branch'] || '').trim();
+            const gu = (r['시군구명'] || r['gu'] || '').trim();
+            const dong = (r['행정동명'] || r['dong'] || '').trim();
+            const road = (r['도로명주소'] || r['road'] || '').trim();
+            const jibun = (r['지번주소'] || r['jibun'] || '').trim();
+            const brand = detectBrand(name);
+
+            parsed.push({
+              id: r['상가업소번호'] || `ST_${i}`,
+              name: name || `${brand} ${branch}`,
+              branch: branch,
+              brand: brand,
+              gu: gu,
+              dong: dong,
+              road: road || jibun,
+              jibun: jibun,
+              lat: lat,
+              lng: lng
+            });
+          }
+
+          if (parsed.length > 0) {
+            rawStores = parsed;
+            document.getElementById('totalCountDisplay').innerText = rawStores.length.toLocaleString();
+            document.getElementById('dataStatusBadge').innerText = `부산 ${rawStores.length.toLocaleString()}개소 완료`;
+            document.getElementById('dataStatusBadge').className = 'text-[11px] px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700';
+
+            // 로컬 스토리지에 캐싱
+            try {
+              localStorage.setItem('BUSAN_CONVENIENCE_DATA', JSON.stringify(rawStores));
+            } catch(e) {}
+
+            document.getElementById('welcomeBannerTitle').innerText = '🎉 2,780개 점포 데이터 로드 완료!';
+            document.getElementById('welcomeBannerDesc').innerText = `부산 전역의 편의점이 지도에 성공적으로 표시되었습니다.`;
+            setTimeout(() => {
+              document.getElementById('welcomeBanner').classList.add('opacity-0', 'pointer-events-none');
+            }, 3000);
+
+            renderBrandFilterCheckboxes();
+            applyFilters();
+            map.flyTo(BUSAN_CENTER, DEFAULT_ZOOM);
+          }
+        },
+        error: function(err) {
+          alert('CSV 파일을 파싱하는 도중 오류가 발생했습니다: ' + err.message);
+        }
+      });
+    }
+
+    // -------------------------------------------------------------
+    // 브랜드 필터 체크박스 생성
+    // -------------------------------------------------------------
+    function renderBrandFilterCheckboxes() {
+      const container = document.getElementById('brandFilterList');
+      container.innerHTML = '';
+
+      const brandCounts = {};
+      Object.keys(BRAND_CONFIG).forEach(b => brandCounts[b] = 0);
+      rawStores.forEach(s => {
+        if (brandCounts[s.brand] !== undefined) brandCounts[s.brand]++;
+        else brandCounts["기타"]++;
+      });
+
+      Object.entries(BRAND_CONFIG).forEach(([key, config]) => {
+        const count = brandCounts[key] || 0;
+        const isChecked = activeBrands.has(key);
+
+        const item = document.createElement('label');
+        item.className = 'flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-200/50 cursor-pointer transition';
+        item.innerHTML = `
+          <div class="flex items-center gap-2">
+            <input type="checkbox" value="${key}" ${isChecked ? 'checked' : ''} 
+              class="brand-checkbox rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 border-slate-300">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: ${config.color};"></span>
+            <span class="font-medium text-slate-700">${config.name}</span>
+          </div>
+          <span class="text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-white border border-slate-200 text-slate-500">
+            ${count.toLocaleString()}
+          </span>
+        `;
+
+        const chk = item.querySelector('input');
+        chk.addEventListener('change', (e) => {
+          if (e.target.checked) activeBrands.add(key);
+          else activeBrands.delete(key);
+          applyFilters();
+        });
+
+        container.appendChild(item);
+      });
+    }
+
+    function resetAllBrandFilters(selectAll) {
+      activeBrands.clear();
+      if (selectAll) {
+        Object.keys(BRAND_CONFIG).forEach(b => activeBrands.add(b));
+      }
+      document.querySelectorAll('.brand-checkbox').forEach(cb => {
+        cb.checked = selectAll;
+      });
+    }
+
+    // -------------------------------------------------------------
+    // 필터링 적용
+    // -------------------------------------------------------------
+    function applyFilters() {
+      const selectedGu = document.getElementById('guFilter').value;
+      const searchKeyword = document.getElementById('searchInput').value.trim().toLowerCase();
+
+      filteredStores = rawStores.filter(store => {
+        // 지역 필터
+        if (selectedGu !== 'ALL' && store.gu !== selectedGu) return false;
+
+        // 브랜드 필터
+        if (!activeBrands.has(store.brand)) return false;
+
+        // 키워드 검색
+        if (searchKeyword) {
+          const matchTarget = `${store.name} ${store.branch} ${store.road} ${store.dong}`.toLowerCase();
+          if (!matchTarget.includes(searchKeyword)) return false;
+        }
+
+        return true;
+      });
+
+      document.getElementById('filteredCountDisplay').innerText = filteredStores.length.toLocaleString();
+      document.getElementById('listCountLabel').innerText = `${filteredStores.length.toLocaleString()}개 점포`;
+
+      renderMarkers();
+      renderStoreList();
+      updateBrandChart();
+    }
+
+    // -------------------------------------------------------------
+    // 지도에 마커 렌더링
+    // -------------------------------------------------------------
+    function renderMarkers() {
+      clusterGroup.clearLayers();
+
+      const markers = [];
+      filteredStores.forEach(store => {
+        const icon = createCustomMarkerIcon(store.brand);
+        const marker = L.marker([store.lat, store.lng], { icon: icon });
+
+        const brandMeta = BRAND_CONFIG[store.brand] || BRAND_CONFIG["기타"];
+        const popupContent = `
+          <div class="w-64 font-sans text-xs">
+            <div class="px-3 py-2 bg-gradient-to-r from-slate-800 to-slate-900 text-white flex items-center justify-between">
+              <span class="font-bold truncate text-sm">${escapeHtml(store.name)}</span>
+              <span class="text-[10px] font-bold px-1.5 py-0.5 rounded text-white" style="background-color: ${brandMeta.color};">
+                ${brandMeta.name}
+              </span>
+            </div>
+            <div class="p-3 space-y-2 bg-white text-slate-700">
+              ${store.branch ? `<div class="text-slate-500 font-semibold text-[11px]"><i class="fa-solid fa-code-branch text-slate-400"></i> ${escapeHtml(store.branch)}</div>` : ''}
+              <div class="flex items-start gap-1.5">
+                <i class="fa-solid fa-location-dot text-rose-500 mt-0.5 shrink-0"></i>
+                <div class="leading-snug">
+                  <div class="text-slate-900 font-medium">${escapeHtml(store.road || store.jibun)}</div>
+                  <div class="text-[10px] text-slate-400">(${escapeHtml(store.gu)} ${escapeHtml(store.dong)})</div>
+                </div>
+              </div>
+              <div class="pt-2 border-t border-slate-100 flex items-center gap-1.5">
+                <button onclick="copyAddress('${escapeHtml(store.road || store.jibun)}')" 
+                  class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-2 rounded-lg font-medium text-center transition flex items-center justify-center gap-1">
+                  <i class="fa-regular fa-copy"></i> 주소복사
+                </button>
+                <a href="https://map.kakao.com/link/to/${encodeURIComponent(store.name)},${store.lat},${store.lng}" target="_blank"
+                  class="bg-amber-400 hover:bg-amber-500 text-slate-900 py-1.5 px-2.5 rounded-lg font-bold text-center transition" title="카카오맵 길찾기">
+                  길찾기
+                </a>
+              </div>
+            </div>
+          </div>
+        `;
+
+        marker.bindPopup(popupContent, { maxWidth: 300 });
+        markers.push(marker);
+      });
+
+      if (isClusteringEnabled) {
+        clusterGroup.addLayers(markers);
+      } else {
+        markers.forEach(m => clusterGroup.addLayer(m));
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 점포 목록 렌더링
+    // -------------------------------------------------------------
+    function renderStoreList() {
+      const container = document.getElementById('storeListContainer');
+      container.innerHTML = '';
+
+      if (filteredStores.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-6 text-slate-400">
+            <i class="fa-solid fa-triangle-exclamation text-2xl mb-1 text-slate-300"></i>
+            <p>조건에 맞는 편의점이 없습니다.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const displayList = filteredStores.slice(0, 100);
+
+      displayList.forEach(store => {
+        const brandMeta = BRAND_CONFIG[store.brand] || BRAND_CONFIG["기타"];
+        const div = document.createElement('div');
+        div.className = 'p-2 rounded-lg border border-slate-200 bg-white hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer transition shadow-xs';
+        div.innerHTML = `
+          <div class="flex items-center justify-between mb-1">
+            <span class="font-bold text-slate-800 truncate">${escapeHtml(store.name)}</span>
+            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded text-white shrink-0" style="background-color: ${brandMeta.color};">
+              ${brandMeta.abbr}
+            </span>
+          </div>
+          <div class="text-[11px] text-slate-500 truncate">
+            <i class="fa-solid fa-location-dot text-[10px] text-slate-400"></i> ${escapeHtml(store.road || store.jibun)}
+          </div>
+        `;
+
+        div.addEventListener('click', () => {
+          map.flyTo([store.lat, store.lng], 17);
+          setTimeout(() => {
+            clusterGroup.eachLayer(layer => {
+              if (layer.getLatLng && Math.abs(layer.getLatLng().lat - store.lat) < 0.0001 && Math.abs(layer.getLatLng().lng - store.lng) < 0.0001) {
+                layer.openPopup();
+              }
+            });
+          }, 350);
+
+          if (window.innerWidth < 768) {
+            document.getElementById('sidebar').classList.add('-translate-x-full');
+          }
+        });
+
+        container.appendChild(div);
+      });
+
+      if (filteredStores.length > 100) {
+        const notice = document.createElement('div');
+        notice.className = 'text-center py-1 text-[11px] text-slate-400';
+        notice.innerText = `...외 ${(filteredStores.length - 100).toLocaleString()}개 더 있음 (지도로 탐색)`;
+        container.appendChild(notice);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 차트 업데이트
+    // -------------------------------------------------------------
+    function updateBrandChart() {
+      const counts = {};
+      Object.keys(BRAND_CONFIG).forEach(b => counts[b] = 0);
+      filteredStores.forEach(s => {
+        if (counts[s.brand] !== undefined) counts[s.brand]++;
+        else counts["기타"]++;
+      });
+
+      const labels = [];
+      const data = [];
+      const colors = [];
+
+      Object.entries(BRAND_CONFIG).forEach(([key, config]) => {
+        if (counts[key] > 0) {
+          labels.push(config.name);
+          data.push(counts[key]);
+          colors.push(config.color);
+        }
+      });
+
+      const ctx = document.getElementById('brandChart').getContext('2d');
+
+      if (!brandChart) {
+        brandChart = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: data,
+              backgroundColor: colors,
+              borderWidth: 2,
+              borderColor: '#ffffff'
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'right',
+                labels: {
+                  boxWidth: 10,
+                  font: { size: 10, family: 'sans-serif' }
+                }
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(context) {
+                    const total = filteredStores.length || 1;
+                    const val = context.raw || 0;
+                    const pct = ((val / total) * 100).toFixed(1);
+                    return ` ${context.label}: ${val}개 (${pct}%)`;
+                  }
+                }
+              }
+            },
+            cutout: '65%'
+          }
+        });
+      } else {
+        brandChart.data.labels = labels;
+        brandChart.data.datasets[0].data = data;
+        brandChart.data.datasets[0].backgroundColor = colors;
+        brandChart.update();
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 유틸리티
+    // -------------------------------------------------------------
+    function escapeHtml(text) {
+      if (!text) return '';
+      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+
+    window.copyAddress = function(addr) {
+      navigator.clipboard.writeText(addr).then(() => {
+        alert('주소가 클립보드에 복사되었습니다:\n' + addr);
+      }).catch(() => {
+        prompt('아래 주소를 복사하세요:', addr);
+      });
+    };
+
+    // -------------------------------------------------------------
+    // 이벤트 바인딩
+    // -------------------------------------------------------------
+    function setupEventListeners() {
+      // 지역 변경
+      document.getElementById('guFilter').addEventListener('change', (e) => {
+        const gu = e.target.value;
+        const targetCoord = GU_CENTERS[gu] || GU_CENTERS["ALL"];
+        map.flyTo([targetCoord.lat, targetCoord.lng], targetCoord.zoom, { duration: 1.2 });
+        applyFilters();
+      });
+
+      // 검색어 입력
+      const searchInput = document.getElementById('searchInput');
+      const btnClear = document.getElementById('btnClearSearch');
+
+      searchInput.addEventListener('input', () => {
+        if (searchInput.value.length > 0) btnClear.classList.remove('hidden');
+        else btnClear.classList.add('hidden');
+        applyFilters();
+      });
+
+      btnClear.addEventListener('click', () => {
+        searchInput.value = '';
+        btnClear.classList.add('hidden');
+        applyFilters();
+      });
+
+      // 브랜드 전체 선택/해제
+      document.getElementById('btnSelectAllBrands').addEventListener('click', () => {
+        resetAllBrandFilters(true);
+        applyFilters();
+      });
+
+      document.getElementById('btnDeselectAllBrands').addEventListener('click', () => {
+        resetAllBrandFilters(false);
+        applyFilters();
+      });
+
+      // 모바일 사이드바 토글
+      document.getElementById('btnToggleSidebar').addEventListener('click', () => {
+        document.getElementById('sidebar').classList.toggle('-translate-x-full');
+      });
+
+      // 배너 닫기
+      document.getElementById('btnCloseBanner').addEventListener('click', () => {
+        document.getElementById('welcomeBanner').classList.add('opacity-0', 'pointer-events-none');
+      });
+
+      // 도움말 모달
+      const helpModal = document.getElementById('helpModal');
+      document.getElementById('btnHelpModal').addEventListener('click', () => helpModal.classList.remove('hidden'));
+      document.getElementById('btnCloseHelpModal').addEventListener('click', () => helpModal.classList.add('hidden'));
+      document.getElementById('btnConfirmHelp').addEventListener('click', () => helpModal.classList.add('hidden'));
+
+      // CSV 파일 선택
+      document.getElementById('csvFileInput').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function(evt) {
+            parseCSVData(evt.target.result);
+          };
+          reader.readAsText(file, 'utf-8');
+        }
+      });
+
+      // 파일 드래그앤드롭
+      const dropZone = document.getElementById('dropZoneOverlay');
+      window.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('hidden');
+      });
+      window.addEventListener('dragover', (e) => {
+        e.preventDefault();
+      });
+      dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('hidden');
+      });
+      window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('hidden');
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+          const file = e.dataTransfer.files[0];
+          if (file.name.endsWith('.csv')) {
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+              parseCSVData(evt.target.result);
+            };
+            reader.readAsText(file, 'utf-8');
+          } else {
+            alert('CSV 형식의 파일만 지원됩니다.');
+          }
+        }
+      });
+    }
+
+    // -------------------------------------------------------------
+    // 초기 로딩
+    // -------------------------------------------------------------
+    function tryLoadInitialData() {
+      // 로컬스토리지에 전체 데이터 캐시가 있는지 확인
+      const cached = localStorage.getItem('BUSAN_CONVENIENCE_DATA');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed && parsed.length > 50) {
+            rawStores = parsed;
+            document.getElementById('dataStatusBadge').innerText = `부산 ${rawStores.length.toLocaleString()}개소 완료`;
+            document.getElementById('dataStatusBadge').className = 'text-[11px] px-2 py-0.5 rounded-full font-medium bg-emerald-100 text-emerald-700';
+            document.getElementById('welcomeBanner').classList.add('opacity-0', 'pointer-events-none');
+          }
+        } catch(e) {}
+      }
+
+      // 기본/캐시 데이터 초기 렌더링
+      document.getElementById('totalCountDisplay').innerText = rawStores.length.toLocaleString();
+      renderBrandFilterCheckboxes();
+      applyFilters();
+    }
+
+    // 메인 진입
+    window.addEventListener('DOMContentLoaded', () => {
+      initMap();
+      setupEventListeners();
+      tryLoadInitialData();
+    });
+  </script>
+</body>
+</html>
